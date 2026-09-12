@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / ambient files
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Dataset folders
+train/
+test/
+val/
+
+# Data CSVs and labels
+train_labels_left.csv
+test_fixed.csv
+*.csv
+
+# Archives and compressed datasets
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Cache and precomputed tensors/features
+cache/
+*.npy
+*.npz
+
+# Model checkpoints and logs
+checkpoints/
+outputs/
+*.pth
+*.pt
+*.onnx
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

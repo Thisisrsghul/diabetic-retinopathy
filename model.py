@@ -6,7 +6,7 @@ from attention_fusion import CrossFeatureAttention, GatedFusionAttention
 
 
 class DRClassifier(nn.Module):
-    def __init__(self, num_classes=Config.NUM_CLASSES):
+    def __init__(self, num_classes=1):
         super().__init__()
         self.cnn = EfficientNetB0FeatureExtractor(pretrained=True)
         cnn_dim = self.cnn.out_dim
@@ -19,12 +19,18 @@ class DRClassifier(nn.Module):
                                           dropout=Config.DROPOUT)
         self.gate = GatedFusionAttention(dim=fused_dim,
                                          dropout=Config.DROPOUT)
+        
+        # Regression output: maps fused features to a single continuous grade
         self.classifier = nn.Sequential(
-            nn.Linear(fused_dim, 512), nn.BatchNorm1d(512), nn.GELU(),
+            nn.Linear(fused_dim, 512), 
+            nn.BatchNorm1d(512), 
+            nn.GELU(),
             nn.Dropout(Config.DROPOUT),
-            nn.Linear(512, 256), nn.BatchNorm1d(256), nn.GELU(),
+            nn.Linear(512, 256), 
+            nn.BatchNorm1d(256), 
+            nn.GELU(),
             nn.Dropout(Config.DROPOUT),
-            nn.Linear(256, num_classes),
+            nn.Linear(256, 1),
         )
 
     def forward(self, image, morph_feats):
@@ -33,4 +39,4 @@ class DRClassifier(nn.Module):
         fused = torch.cat([cnn_feat, m], dim=1)
         fused = self.gate(fused)
         fused = self.attn(fused)
-        return self.classifier(fused)
+        return self.classifier(fused).squeeze(1)

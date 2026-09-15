@@ -1,24 +1,30 @@
 import os
 import cv2
+import torch
 import numpy as np
 import pandas as pd
-import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
-from config import Config
 
 
 def _load_label_csv(csv_path, split="left"):
-    """Read CSV; strip BOM; keep only '<id>_<split>' rows."""
     df = pd.read_csv(csv_path, encoding="utf-8-sig")
     df.columns = [c.strip() for c in df.columns]
-    df = df[df["image"].astype(str).str.endswith(f"_{split}")].reset_index(drop=True)
-    return df
+    
+    img_col = next((c for c in df.columns if "image" in c.lower()), df.columns[0])
+    target_col = next((c for c in ["level", "label", "dr_level"] if c in df.columns), None)
+    
+    if split in ("left", "right"):
+        df = df[df[img_col].str.endswith(f"_{split}")].copy()
+    
+    rename_dict = {img_col: "image"}
+    if target_col:
+        rename_dict[target_col] = "level"
+    return df.rename(columns=rename_dict).reset_index(drop=True)
 
 
 class DRDataset(Dataset):
-    def __init__(self, df, img_dir, img_size=512, train=True,
-                 morph_cache=None, name_to_row=None):
+    def __init__(self, df, img_dir, img_size, train=True, morph_cache=None, name_to_row=None):
         self.df = df
         self.img_dir = img_dir
         self.img_size = img_size
@@ -26,19 +32,13 @@ class DRDataset(Dataset):
         self.morph_cache = morph_cache
         self.name_to_row = name_to_row
 
-        self.tf_train = transforms.Compose([
+        # Standard augmentations suitable for enhanced grayscale fundus images
+        self.transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((img_size, img_size)),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225]),
-        ])
-        self.tf_eval = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip() if train else transforms.Lambda(lambda x: x),
+            transforms.RandomVerticalFlip() if train else transforms.Lambda(lambda x: x),
+            transforms.RandomRotation(360) if train else transforms.Lambda(lambda x: x),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
@@ -47,37 +47,41 @@ class DRDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def _find_image(self, name):
-        for ext in (".png", ".jpg", ".jpeg", ".tif", ".bmp", ".JPG", ".JPEG"):
-            p = os.path.join(self.img_dir, name + ext)
-            if os.path.exists(p):
-                return p
-        raise FileNotFoundError(f"No image for {name} in {self.img_dir}")
-
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        name = row["image"]
-        label = int(row["level"]) if "level" in row else -1
+        img_name = str(row["image"])
+        
+        # Check extensions
+        img_path = os.path.join(self.img_dir, f"{img_name}.jpeg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(self.img_dir, f"{img_name}.jpg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(self.img_dir, f"{img_name}.png")
 
-        img_path = self._find_image(name)
-        img_bgr = cv2.imread(img_path)
-        if img_bgr is None:
-            raise RuntimeError(f"cv2 could not read {img_path}")
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img_rgb = cv2.resize(img_rgb, (self.img_size, self.img_size))
-        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+        # Read the enhanced image as grayscale (since MATLAB locallapfilt saved single-channel)
+        gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        
+        if gray is None:
+            gray = np.zeros((self.img_size, self.img_size), dtype=np.uint8)
 
-        tf = self.tf_train if self.train else self.tf_eval
-        img_tensor = tf(img_rgb)
+        # Duplicate single channel to 3 channels (RGB) for EfficientNet compatibility
+        img_rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
-        sample = {
+        img_tensor = self.transform(img_rgb)
+        gray_tensor = torch.from_numpy(gray).float().unsqueeze(0) / 255.0
+
+        item = {
             "image": img_tensor,
-            "gray": torch.from_numpy(gray).float().unsqueeze(0),
-            "label": torch.tensor(label, dtype=torch.long),
-            "name": name,
+            "gray": gray_tensor,
+            "image_name": img_name
         }
+
+        if "level" in row:
+            item["label"] = torch.tensor(float(row["level"]), dtype=torch.float32)
+
         if self.morph_cache is not None and self.name_to_row is not None:
-            r = self.name_to_row.get(name, -1)
-            if r >= 0:
-                sample["morph"] = torch.from_numpy(self.morph_cache[r]).float()
-        return sample
+            if img_name in self.name_to_row:
+                cache_idx = self.name_to_row[img_name]
+                item["morph"] = torch.from_numpy(self.morph_cache[cache_idx]).float()
+
+        return item

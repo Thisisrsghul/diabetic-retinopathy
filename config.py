@@ -1,44 +1,41 @@
 import os
-
-BASE = os.path.dirname(os.path.abspath(__file__))
+import torch
 
 class Config:
-    # ---------- Paths (relative to project root) ----------
-    TRAIN_DIR = os.path.join(BASE, "train")     # enhanced train images
-    TEST_DIR  = os.path.join(BASE, "test")      # enhanced test images
-    ENHANCED_DIR = TRAIN_DIR                    # generic alias
+    BASE_DATA = "/kaggle/input/datasets/yuva876/dr-dataset/traintest"
+    TRAIN_DIR = os.path.join(BASE_DATA, "train")
+    TEST_DIR  = os.path.join(BASE_DATA, "test")
+    ENHANCED_DIR = TRAIN_DIR
 
-    TRAIN_CSV = os.path.join(BASE, "train_labels_left.csv")
-    TEST_CSV  = os.path.join(BASE, "test_fixed.csv")   # filtered left-only
-    TEST_CSV_FULL = os.path.join(BASE, "testLabels.csv")
+    TRAIN_CSV = "/kaggle/input/datasets/yuva876/dr-dataset/traintest/train_labels_left.csv"
+    TEST_CSV  = "/kaggle/input/datasets/yuva876/dr-dataset/traintest/test_fixed.csv"
+    TEST_CSV_FULL = os.path.join(BASE_DATA, "testLabels.csv")
 
-    CHECKPOINT = os.path.join(BASE, "checkpoints", "best_model.pth")
-    OUTPUT_DIR = os.path.join(BASE, "outputs")
-    CACHE_DIR  = os.path.join(BASE, "cache")
+    BASE_WORK = "/kaggle/working"
+    CHECKPOINT = os.path.join(BASE_WORK, "checkpoints", "best_model.pth")
+    OUTPUT_DIR = os.path.join(BASE_WORK, "outputs")
+    CACHE_DIR  = os.path.join(BASE_WORK, "cache")
 
-    # ---------- Image ----------
     IMG_SIZE = 512
     MIN_SEGMENT_LEN = 8
 
-    # ---------- Training ----------
-    BATCH_SIZE   = 16  # Increase to 16 or 32 now that AMP is active
-    EPOCHS       = 30  # CosineAnnealing converges fast on frozen heads
-    LR           = 3e-4 # Slightly higher LR suited for frozen backbone + linear head
+    # Hardware (Dual T4 x2)
+    NUM_GPUS     = torch.cuda.device_count()
+    BATCH_SIZE   = 32 if NUM_GPUS > 1 else 16
+    EPOCHS       = 30
+    LR           = 6e-4 if NUM_GPUS > 1 else 3e-4
     NUM_WORKERS  = 4
     WEIGHT_DECAY = 1e-4
     NUM_CLASSES  = 5
     SEED         = 42
 
-    # ---------- Feature dims ----------
     MORPH_DIM = 30
     CNN_DIM   = 1280
     FUSED_DIM = MORPH_DIM + CNN_DIM
 
-    # ---------- Attention ----------
-    ATTN_HEADS = 8
+    ATTN_HEADS = 10
     DROPOUT    = 0.4
-
-    DEVICE = "cuda"
+    DEVICE     = "cuda"
 
 os.makedirs(Config.OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(Config.CHECKPOINT), exist_ok=True)
